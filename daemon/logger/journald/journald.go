@@ -6,19 +6,26 @@ package journald // import "github.com/docker/docker/daemon/logger/journald"
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"unicode"
 
 	"github.com/coreos/go-systemd/journal"
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/daemon/logger/loggerutils"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
-const name = "journald"
+const (
+	name = "journald"
+
+	defaultSize = 48 * 1024
+)
 
 type journald struct {
 	mu      sync.Mutex
+	size    int
 	vars    map[string]string // additional variables and values to send to the journal along with the log message
 	readers map[*logger.LogWatcher]struct{}
 	closed  bool
@@ -81,7 +88,17 @@ func New(info logger.Info) (logger.Logger, error) {
 	for k, v := range extraAttrs {
 		vars[k] = v
 	}
-	return &journald{vars: vars, readers: make(map[*logger.LogWatcher]struct{})}, nil
+
+	size := defaultSize
+	if maxSizeStr, ok := info.Config["max-line-length"]; ok {
+		maxSize, err := strconv.Atoi(maxSizeStr)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to convert max-line-length configuration into an integer")
+		}
+		size = maxSize
+	}
+
+	return &journald{size: size, vars: vars, readers: make(map[*logger.LogWatcher]struct{})}, nil
 }
 
 // We don't actually accept any options, but we have to supply a callback for
@@ -121,4 +138,8 @@ func (s *journald) Log(msg *logger.Message) error {
 
 func (s *journald) Name() string {
 	return name
+}
+
+func (s *journald) BufSize() int {
+	return s.size
 }
